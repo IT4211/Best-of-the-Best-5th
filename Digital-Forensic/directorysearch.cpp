@@ -29,7 +29,7 @@ void filelist(TCHAR *path, int depth) {
 				}
 				_tprintf(_T("----%s <DIR>\n"), wfd.cFileName);			// 디렉토리 출력
 				swprintf_s(subdir, L"%s%s\\", path, wfd.cFileName);		// 하위 디렉토리 경로 설정
-				filelist(subdir, depth + 1);							// 재귀하여 하위 디렉토리 탐색
+				filelist(subdir, depth + 1);					// 재귀하여 하위 디렉토리 탐색
 			}
 		}
 		else {	// 일반파일인 경우 
@@ -38,12 +38,12 @@ void filelist(TCHAR *path, int depth) {
 				while(i--) 
 					_tprintf(_T("    "));
 
-				_tprintf(_T("%s\n"), wfd.cFileName);					// 하위 디렉토리 내 파일 출력
+				_tprintf(_T("%s\n"), wfd.cFileName);				// 하위 디렉토리 내 파일 출력
 				continue;
 			}
-			_tprintf(_T("    %s\n"), wfd.cFileName);					// 일반 파일 출력
+			_tprintf(_T("    %s\n"), wfd.cFileName);				// 일반 파일 출력
 		}
-	} while (FindNextFile(hfind, &wfd));								// 다음 파일에 대한 정보를 가져온다. 
+	} while (FindNextFile(hfind, &wfd));							// 다음 파일에 대한 정보를 가져온다. 
 	FindClose(hfind);
 }
 
