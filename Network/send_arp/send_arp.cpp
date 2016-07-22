@@ -11,10 +11,9 @@
 #include <pthread.h>
 #include <unistd.h>
 
-#define ETHER_H_SIZE sizeof(struct ether_header)
 #define ARP_H_SIZE sizeof(struct ether_arp)
 
-// get local ip addr and mac addr 
+// get local ip addr and mac addr
 void get_ifconfig(char * dev, char *ip, char *mac){
     int s;
     struct ifreq ifr;
@@ -33,39 +32,30 @@ void get_ifconfig(char * dev, char *ip, char *mac){
 
     close(s);
 
-    printf("%s \n", ip);
-    printf("%s \n", mac);
-}
-
-// get gateway ip addr
-void get_gateway(char *gateway){
-    FILE *fp;
-    fp = popen("route -n | grep 'UG[ \t]' | awk '{print $2}'","r");
-    if(fp != NULL){
-        while(fgets(gateway, 1024, fp))
-    }
-    printf("%s", gateway);
-    pclose(fp);
+    printf("[in function] ip : %s \n", ip);
+    printf("[in function] mac : %s \n", mac);
 }
 
 int main(int argc, char *argv[])
 {
     pcap_t* pkt;
+    struct pcap_pkthdr *pkt_header;
+    const u_char *pkt_data;
     char *dev;
     char errbuf[PCAP_ERRBUF_SIZE];
-    struct in_addr net_addr;
+    //struct in_addr net_addr;
 
     bpf_u_int32 mask;
     bpf_u_int32 net;
 
     char *local_ip;
     char *local_mac;
+    const char* target_ip = argv[1];
 
     if(argc < 2){
         fprintf(stderr, "Usage : send_arp <victim ip>\n");
         return -1;
     }
-    
 
     struct ether_header *ether_h;
     ether_h->ether_type = htons(ETH_P_ARP); // 0x0806, ARP packet
@@ -74,7 +64,7 @@ int main(int argc, char *argv[])
 
     dev = pcap_lookupdev(errbuf);
     if(dev == NULL){
-        fprintf(stderr, "Couldn't find default device : %s\n", errbuf);
+        fprintf(stderr, "Couldn't find defult deavice : %s\n", errbuf);
         return(2);
     }
 
@@ -91,28 +81,54 @@ int main(int argc, char *argv[])
 
     /* set victim ip/mac */
 
-    // get victim mac address
-    // arp_tha = get from origin mac request
-
-
-
     // get victim ip address
-    arp_req.arp_tpa = htons(argv[1]);
 
-    /* Make frame : | ethernet | arp | */
-
-    unsigned char frame[ETHER_H_SIZE + ARP_H_SIZE];
-    memcpy(frame, &ether_h, ETHER_H_SIZE);
-    memcpy(frame + ETHER_H_SIZE, &arp_req, ARP_H_SIZE);
-
-    /* send frame, using sendpacket */
-    
-    if(pcap_sendpacket(fp, frame, sizeof(frame)) == -1){
-        pcap_perror(fp, 0);
-        pcap_close(fp);
+    struct in_addr target_ip_addr = {0};
+    if(!inet_aton(target_ip, &target_ip_addr)){
+        fprintf(stderr, "%s is not a valid IP address", target_ip);
         exit(1);
     }
-    
+    memcpy(&arp_req.arp_tpa, &target_ip_addr.s_addr, sizeof(arp_req.arp_tpa));
+
+
+    // get victim mac address
+    pkt = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
+    if(pkt == NULL){
+        fprintf(stderr, "Couldn't open device %s : %s\n", dev, errbuf);
+        return(2);
+    }
+
+    memset(ether_h->ether_dhost, "0xff", sizeof(ether_h->ether_dhost));
+    //ether_h->ether_dhost.ether_addr_octet[] = ether_aton(host.ether_addr_octet);
+
+    unsigned char frame[ETHER_HDR_LEN + ARP_H_SIZE];
+    memcpy(frame, &ether_h, sizeof(ETHER_HDR_LEN));
+    memcpy(frame+sizeof(ETHER_HDR_LEN), &arp_req, sizeof(ARP_H_SIZE));
+
+    if(pcap_sendpacket(pkt, frame, sizeof(frame)) == -1){
+        pcap_perror(pkt, 0);
+        pcap_close(pkt);
+        exit(1);
+    }
+
+    while(1){
+        if(pcap_next_ex(pkt, &pkt_header, &pkt_data) < 0){
+            printf("Can't read packet\n");
+            break;
+        }
+    }
+
+
+    /* Make frame : | ethernet | arp | */
+    /* send frame, using sendpacket */
+
+    if(pcap_sendpacket(pkt, frame, sizeof(frame)) == -1){
+        pcap_perror(pkt, 0);
+        pcap_close(pkt);
+        exit(1);
+    }
+
     pcap_close(pkt);
     return 0;
 }
+
