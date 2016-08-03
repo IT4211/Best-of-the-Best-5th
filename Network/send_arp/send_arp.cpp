@@ -1,134 +1,199 @@
+#define _CRT_SECURE_NO_WARNINGS
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#pragma comment(lib, "Iphlpapi.lib")
+#pragma comment(lib, "ws2_32.lib")
+
+#include "pcap.h"
 #include <stdio.h>
+#include <tchar.h>
 #include <stdlib.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <sys/ioctl.h>
-#include <netinet/in.h>
-#include <net/if.h>
-#include <netinet/ether.h>
-#include <pcap/pcap.h>
-#include <arpa/inet.h>
-#include <pthread.h>
-#include <unistd.h>
+#include <windows.h>
+#include <WinSock2.h>
+#include <WS2tcpip.h>
+#include <IPHlpApi.h>
 
-#define ARP_H_SIZE sizeof(struct ether_arp)
+#define ETH_HDRLEN 14      // Ethernet header length
+#define ARP_HDRLEN 28      // ARP header length
 
-// get local ip addr and mac addr
-void get_ifconfig(char * dev, char *ip, char *mac){
-    int s;
-    struct ifreq ifr;
-    char *iface = dev;
+#define ARPHRD_ETHER 1
+#define ARP_OP_REQUEST 1
+#define ARP_OP_REPLY 2
 
-    s = socket(AF_INET, SOCK_DGRAM, 0);
+#define ETHER_ADDR_LEN 6
 
-    ifr.ifr_addr.sa_family = AF_INET;
-    strncpy(ifr.ifr_name, iface, IFNAMSIZ-1);
+typedef struct mac_address {
+	u_char byte1;
+	u_char byte2;
+	u_char byte3;
+	u_char byte4;
+	u_char byte5;
+	u_char byte6;
+}mac;
 
-    ioctl(s, SIOCGIFADDR, &ifr); // ip address
-    inet_ntop(AF_INET, &(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr), ip, INET_ADDRSTRLEN);
+typedef struct ether_header {
+	unsigned char ether_dhost[ETHER_ADDR_LEN];
+	unsigned char ether_shost[ETHER_ADDR_LEN];
+	unsigned short ether_type;
+}ETHER_HDR;
 
-    ioctl(s, SIOCGIFHWADDR, &ifr); // mac address
-    mac = ether_ntoa((struct ether_addr*)ifr.ifr_hwaddr.sa_data);
+#define ETHERTYPE_IP 0x0800
+#define ETHERTYPE_ARP 0x0806
 
-    close(s);
+typedef struct ip_address {
+	u_char byte1;
+	u_char byte2;
+	u_char byte3;
+	u_char byte4;
+}ip_address;
 
-    printf("[in function] ip : %s \n", ip);
-    printf("[in function] mac : %s \n", mac);
-}
+typedef struct arp_header {
+	u_int16_t htype;
+	u_int16_t ptype;
+	u_int8_t hlen;
+	u_int8_t plen;
+	u_int16_t opcode;
+	u_int8_t sender_mac[6];
+	u_int8_t sender_ip[4];
+	u_int8_t target_mac[6];
+	u_int8_t target_ip[4];
+}ARP_HDR;
+
+typedef struct ip_header {
+	u_char ver_ihl;
+	u_char tos;
+	u_short tlen; 
+	u_short identification; 
+	u_short flags_fo;
+	u_char ttl;
+	u_char proto;
+	u_short crc;
+	ip_address saddr;    
+	ip_address daddr;
+	u_int op_pad; 
+}IP_HDR;
+
+
 
 int main(int argc, char *argv[])
 {
-    pcap_t* pkt;
-    struct pcap_pkthdr *pkt_header;
-    const u_char *pkt_data;
-    char *dev;
-    char errbuf[PCAP_ERRBUF_SIZE];
-    //struct in_addr net_addr;
+	pcap_t* pkt;
+	//struct pcap_pkthdr *pkt_header;
+	//const u_char *pkt_data;
+	pcap_if_t *dev;
+	//char *dev;	
+	char errbuf[PCAP_ERRBUF_SIZE];
+	const char* target_ip = argv[1];
 
-    bpf_u_int32 mask;
-    bpf_u_int32 net;
+	// Local IP Address, Local MAC Address, Gateway를 얻어온다.  
+	char *Myip = (char*)malloc(16);
+	char *Gateway = (char*)malloc(16);
+	char *Mymac = (char*)malloc(17);
+	u_int8_t byteMAC[8];
+	unsigned int lntMyip;
 
-    char *local_ip;
-    char *local_mac;
-    const char* target_ip = argv[1];
+	PIP_ADAPTER_INFO AdapterInfo;	// 어뎁터가 가지고 있는 정보를 저장
+	PIP_ADAPTER_INFO pAdapter = NULL;
+	ULONG ulOutBufLen = sizeof(IP_ADAPTER_INFO);
+	DWORD dwRetVal = 0;
 
-    if(argc < 2){
-        fprintf(stderr, "Usage : send_arp <victim ip>\n");
-        return -1;
-    }
+	/*
+	if (argc < 2) {
+		fprintf(stderr, "Usage : send_arp <victim ip>\n");
+		return -1;
+	}*/
+	
 
-    struct ether_header *ether_h;
-    ether_h->ether_type = htons(ETH_P_ARP); // 0x0806, ARP packet
+	AdapterInfo = (IP_ADAPTER_INFO*)malloc(sizeof(IP_ADAPTER_INFO));
 
-    struct ether_arp arp_req;
+	if (AdapterInfo == NULL) {
+		printf("Error allocating memory needed to call GetAdaptersinfo\n");
+		return 1;
+	}
 
-    dev = pcap_lookupdev(errbuf);
-    if(dev == NULL){
-        fprintf(stderr, "Couldn't find defult deavice : %s\n", errbuf);
-        return(2);
-    }
+	if (GetAdaptersInfo(AdapterInfo, &ulOutBufLen) == ERROR_BUFFER_OVERFLOW) {
+		free(AdapterInfo);
+		AdapterInfo = (IP_ADAPTER_INFO *)malloc(ulOutBufLen);
+		if (AdapterInfo == NULL) {
+			printf("Error allocating memory needed to call GetAdaptersinfo\n");
+			return 1;
+		}
+	}
 
-    if(pcap_lookupnet(dev, &net, &mask, errbuf) == -1){
-        fprintf(stderr, "Can't get netmask for device %s\n", dev);
-        net = 0;
-        mask = 0;
-    }
+	if ((dwRetVal = GetAdaptersInfo(AdapterInfo, &ulOutBufLen)) == NO_ERROR) {
+		pAdapter = AdapterInfo;
+	}
 
-    get_ifconfig(dev, local_ip, local_mac);
+	sprintf(Myip, "%s", pAdapter->IpAddressList.IpAddress.String);
+	sprintf(Gateway, "%s", pAdapter->GatewayList.IpAddress.String);
+	sprintf(Mymac, "%02X:%02X:%02X:%02X:%02X:%02X",
+		AdapterInfo->Address[0], AdapterInfo->Address[1],
+		AdapterInfo->Address[2], AdapterInfo->Address[3],
+		AdapterInfo->Address[4], AdapterInfo->Address[5]);
+	memcpy(byteMAC, AdapterInfo->Address, sizeof(byteMAC));
 
-    printf("%s \n", local_ip);
-    printf("%s \n", local_mac);
+	printf("IP address: \t%s\n", Myip);
+	printf("Gateway: \t%s\n", Gateway);
+	printf("MAC: \t%s\n", Mymac);
+	free(AdapterInfo);
 
-    /* set victim ip/mac */
+	lntMyip = (unsigned int)inet_addr(Myip);
 
-    // get victim ip address
+	if (pcap_findalldevs_ex(PCAP_SRC_IF_STRING, NULL /* auth is not needed */, &dev, errbuf) == -1)
+	{
+		fprintf(stderr, "Error in pcap_findalldevs_ex: %s\n", errbuf);
+		exit(1);
+	}
 
-    struct in_addr target_ip_addr = {0};
-    if(!inet_aton(target_ip, &target_ip_addr)){
-        fprintf(stderr, "%s is not a valid IP address", target_ip);
-        exit(1);
-    }
-    memcpy(&arp_req.arp_tpa, &target_ip_addr.s_addr, sizeof(arp_req.arp_tpa));
+	printf("%s\n", dev->name);
 
+	if ((pkt = pcap_open(dev->name,          // name of the device
+		65536,            // portion of the packet to capture
+						  // 65536 guarantees that the whole packet will be captured on all the link layers
+		PCAP_OPENFLAG_PROMISCUOUS,    // promiscuous mode
+		1000,             // read timeout
+		NULL,             // authentication on the remote machine
+		errbuf            // error buffer
+	)) == NULL)
+	{
+		fprintf(stderr, "\nUnable to open the adapter. %s is not supported by WinPcap\n", dev->name);
+		/* Free the device list */
+		pcap_freealldevs(dev);
+		return -1;
+	}
 
-    // get victim mac address
-    pkt = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
-    if(pkt == NULL){
-        fprintf(stderr, "Couldn't open device %s : %s\n", dev, errbuf);
-        return(2);
-    }
+	printf("\nlistening on %s...\n", dev->description);
 
-    memset(ether_h->ether_dhost, "0xff", sizeof(ether_h->ether_dhost));
-    //ether_h->ether_dhost.ether_addr_octet[] = ether_aton(host.ether_addr_octet);
+	u_char packet[ETH_HDRLEN + ARP_HDRLEN + 60];
 
-    unsigned char frame[ETHER_HDR_LEN + ARP_H_SIZE];
-    memcpy(frame, &ether_h, sizeof(ETHER_HDR_LEN));
-    memcpy(frame+sizeof(ETHER_HDR_LEN), &arp_req, sizeof(ARP_H_SIZE));
+	ETHER_HDR *ether = (ETHER_HDR*)packet;
+	memset(ether->ether_dhost, 0xFF, sizeof(ether->ether_dhost));
+	memcpy(ether->ether_shost, byteMAC, sizeof(ether->ether_shost));
+	ether->ether_type = htons(ETHERTYPE_ARP);
 
-    if(pcap_sendpacket(pkt, frame, sizeof(frame)) == -1){
-        pcap_perror(pkt, 0);
-        pcap_close(pkt);
-        exit(1);
-    }
+	ARP_HDR *arp = (ARP_HDR*)(packet + ETH_HDRLEN);
+	arp->htype = htons(ARPHRD_ETHER);
+	arp->ptype = htons(ETHERTYPE_IP);
+	arp->hlen = sizeof(mac);
+	arp->plen = sizeof(ip_address);
+	arp->opcode = htons(ARP_OP_REQUEST);
+	memcpy(arp->sender_mac, byteMAC, sizeof(arp->sender_mac));
+	*(unsigned int*)(arp->sender_ip) = lntMyip;
+	memset(arp->target_mac, 0x00, sizeof(arp->target_mac));
+	*(unsigned int*)(arp->target_ip) = (unsigned int)inet_addr(target_ip);
+	
+	while (1) {
+		if (pcap_sendpacket(pkt, packet, sizeof(packet)) != 0) {
+			fprintf(stderr, "\nError sending the packet: %s\n", pcap_geterr(pkt));
+			return -1;
+		}
+		printf("send packet!!\n");
+		Sleep(1000);
+	}
+	pcap_freealldevs(dev);
 
-    while(1){
-        if(pcap_next_ex(pkt, &pkt_header, &pkt_data) < 0){
-            printf("Can't read packet\n");
-            break;
-        }
-    }
+	free(Myip);
+	free(Gateway);
+	free(Mymac);
 
-
-    /* Make frame : | ethernet | arp | */
-    /* send frame, using sendpacket */
-
-    if(pcap_sendpacket(pkt, frame, sizeof(frame)) == -1){
-        pcap_perror(pkt, 0);
-        pcap_close(pkt);
-        exit(1);
-    }
-
-    pcap_close(pkt);
-    return 0;
+	return 0;
 }
-
