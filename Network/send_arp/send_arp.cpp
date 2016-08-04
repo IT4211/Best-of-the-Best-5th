@@ -72,8 +72,6 @@ typedef struct ip_header {
 	u_int op_pad; 
 }IP_HDR;
 
-
-
 int main(int argc, char *argv[])
 {
 	pcap_t* pkt;
@@ -99,11 +97,11 @@ int main(int argc, char *argv[])
 	ULONG ulOutBufLen = sizeof(IP_ADAPTER_INFO);
 	DWORD dwRetVal = 0;
 
-	/*
+	
 	if (argc < 2) {
 		fprintf(stderr, "Usage : send_arp <victim ip>\n");
 		return -1;
-	}*/
+	}
 	
 	unsigned int IntMytarget = (unsigned int)inet_addr(target_ip);
 
